@@ -1,0 +1,124 @@
+name: Build Unity Hub AppImage
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file appstream ca-certificates curl gpg
+
+      - name: Build AppImage
+        run: |
+          chmod +x build-unityhub-appimage.sh
+          ./build-unityhub-appimage.sh
+
+      - name: Get build artifacts info
+        id: artifacts
+        run: |
+          # Find the generated AppImage in ./out/ directory
+          APPIMAGE=$(ls ./out/UnityHub-*-x86_64.AppImage 2>/dev/null | head -1)
+          
+          if [ -z "$APPIMAGE" ]; then
+            echo "Error: No AppImage found in ./out/"
+            exit 1
+          fi
+          
+          # Extract version from filename (UnityHub-3.14.3-x86_64.AppImage -> 3.14.3)
+          UNITY_VERSION=$(basename "$APPIMAGE" | sed -n 's/UnityHub-\(.*\)-x86_64.AppImage/\1/p')
+          
+          # Get checksum
+          CHECKSUM=$(cat "${APPIMAGE}.sha256")
+          
+          # Get file size
+          FILE_SIZE=$(du -h "$APPIMAGE" | cut -f1)
+          
+          # Get just the filename for release assets
+          APPIMAGE_NAME=$(basename "$APPIMAGE")
+          
+          # Export to GitHub outputs
+          echo "appimage=$APPIMAGE" >> $GITHUB_OUTPUT
+          echo "appimage_name=$APPIMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "version=$UNITY_VERSION" >> $GITHUB_OUTPUT
+          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          echo "filesize=$FILE_SIZE" >> $GITHUB_OUTPUT
+          
+          # Debug output
+          echo "Found AppImage: $APPIMAGE"
+          echo "Version: $UNITY_VERSION"
+          echo "Size: $FILE_SIZE"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.artifacts.outputs.version }}
+          name: Unity Hub ${{ steps.artifacts.outputs.version }}
+          body: |
+            # Unity Hub AppImage v${{ steps.artifacts.outputs.version }}
+            
+            Unofficial AppImage build of Unity Hub for Linux.
+            
+            **File Size:** ${{ steps.artifacts.outputs.filesize }}
+            
+            ## Download
+            
+            Download `${{ steps.artifacts.outputs.appimage_name }}` below.
+            
+            ## Installation
+            
+            ```bash
+            # Download the AppImage
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.artifacts.outputs.version }}/${{ steps.artifacts.outputs.appimage_name }}
+            
+            # Make it executable
+            chmod +x ${{ steps.artifacts.outputs.appimage_name }}
+            
+            # Run it
+            ./${{ steps.artifacts.outputs.appimage_name }}
+            ```
+            
+            ## Verification
+            
+            **SHA256 Checksum:**
+            ```
+            ${{ steps.artifacts.outputs.checksum }}
+            ```
+
+            ## Notes
+            
+            - This is an **unofficial** build of Unity Hub
+            - Unity Hub is proprietary software by Unity Technologies
+            - Use at your own risk
+            - For official builds, visit: https://unity.com/download
+
+          files: |
+            ${{ steps.artifacts.outputs.appimage }}
+            ${{ steps.artifacts.outputs.appimage }}.sha256
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnityHub-${{ steps.artifacts.outputs.version }}-AppImage
+          path: |
+            ${{ steps.artifacts.outputs.appimage }}
+            ${{ steps.artifacts.outputs.appimage }}.sha256
+          retention-days: 30

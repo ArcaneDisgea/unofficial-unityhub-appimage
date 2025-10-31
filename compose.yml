@@ -1,0 +1,8 @@
+services:
+  uhaitest:
+    container_name: UHAITest
+    build:
+      context: .
+      no_cache: true
+    volumes:
+      - ./out:/app/out:z
