@@ -148,11 +148,10 @@ PACKAGES_PATH=$(echo "$RELEASES_RESP" | awk '{print $3}')
 UNITY_PACKAGES="$UNITY_BASE_URL/dists/stable/$PACKAGES_PATH"
 
 UNITY_PACKAGES_RESP="$(get_package_info "$(curl -sL $UNITY_PACKAGES)" "$VER")"
-echo "$UNITY_PACKAGES_RESP"
 
 if [[ -n "$UNITY_PACKAGES_RESP" ]]; then
     eval "$UNITY_PACKAGES_RESP"
-    UNITY_HUB_PACKAGE_VERSION="$VER"
+    UNITY_HUB_PACKAGE_VERSION="$VERSION"
     UNITY_HUB_PACKAGE_FILENAME="$(echo "$FILENAME" | rev | cut -d'/' -f1 | rev)"
     UNITY_HUB_PACKAGE_URL="$UNITY_BASE_URL/$FILENAME"
     UNITY_HUB_PACKAGE_SHA="$SHA256";
@@ -206,17 +205,15 @@ fi
 
 # setup appdir
 echo "Creating AppDir..."
-mkdir -p ./UnityHub.AppDir/usr
+mkdir -p ./UnityHub.AppDir/usr/share/icons/
 
 echo "Copying package data..."
-if [ -d "./$EXTRACTED_PKG_DATA/opt/unityhub" ]; then
-    cp -r ./$EXTRACTED_PKG_DATA/opt/unityhub/* ./UnityHub.AppDir/usr/
-fi
-cp -r ./$EXTRACTED_PKG_DATA/usr/* ./UnityHub.AppDir/usr/
+cp -r ./$EXTRACTED_PKG_DATA/opt/unityhub/* ./UnityHub.AppDir/
+cp -r ./$EXTRACTED_PKG_DATA/usr/share/icons/* ./UnityHub.AppDir/usr/share/icons/
 
 # create desktop file
-echo "Copying desktop file..."
-cp ../assets/unityhub.desktop ./UnityHub.AppDir/unityhub.desktop
+echo "Creating desktop file..."
+sed "s/UNIQUE_VERSION_TEXT_FOR_SED/$UNITY_HUB_PACKAGE_VERSION/g" ../assets/unityhub.desktop > ./UnityHub.AppDir/unityhub.desktop
 
 # copy icon
 echo "Copying app icons..."

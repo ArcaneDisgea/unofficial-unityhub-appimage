@@ -4,5 +4,5 @@ HERE=${SELF%/*}
 export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib/x86_64-linux-gnu:${HERE}/usr/lib64:${LD_LIBRARY_PATH}"
 export PATH="${HERE}/usr/bin:${PATH}"
 UNITYHUB="${HERE}/usr/bin/unityhub"
-[ ! -f "$UNITYHUB" ] && UNITYHUB="${HERE}/usr/unityhub"
+[ ! -f "$UNITYHUB" ] && UNITYHUB="${HERE}/unityhub"
 exec "$UNITYHUB" "$@"
