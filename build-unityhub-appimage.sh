@@ -2,6 +2,117 @@
 set -e
 set -u
 
+VER="latest"
+
+if [[ "$#" -ne 0 ]]; then
+    VER="$1"
+fi
+
+
+# functions time
+get_package_info() {
+    local packages_content="$1"
+    local desired_version="$2"
+    
+    if [[ "$desired_version" == "latest" ]]; then
+        # get the latest version
+        echo "$packages_content" | awk '
+            BEGIN { 
+                RS=""
+                FS="\n"
+            }
+            
+            # compare two version strings (returns 1 if v1 > v2, 0 otherwise)
+            function version_greater(v1, v2,    a1, a2, n1, n2, i, max) {
+                n1 = split(v1, a1, /[.\-]/)
+                n2 = split(v2, a2, /[.\-]/)
+                max = (n1 > n2) ? n1 : n2
+                
+                for (i = 1; i <= max; i++) {
+                    # Treat missing parts as 0
+                    part1 = (i <= n1) ? a1[i] : 0
+                    part2 = (i <= n2) ? a2[i] : 0
+                    
+                    # Convert to numbers for comparison
+                    if (part1 + 0 > part2 + 0) return 1
+                    if (part1 + 0 < part2 + 0) return 0
+                }
+                return 0
+            }
+            
+            {
+                version=""
+                filename=""
+                sha256=""
+                
+                for (i=1; i<=NF; i++) {
+                    if ($i ~ /^Version: /) {
+                        sub(/^Version: /, "", $i)
+                        version=$i
+                    }
+                    else if ($i ~ /^Filename: /) {
+                        sub(/^Filename: /, "", $i)
+                        filename=$i
+                    }
+                    else if ($i ~ /^SHA256: /) {
+                        sub(/^SHA256: /, "", $i)
+                        sha256=$i
+                    }
+                }
+                
+                if (version) {
+                    if (max_ver == "" || version_greater(version, max_ver)) {
+                        max_ver=version
+                        max_fname=filename
+                        max_sha=sha256
+                    }
+                }
+            }
+            END {
+                if (max_ver) {
+                    print "VERSION=" max_ver
+                    print "FILENAME=" max_fname
+                    print "SHA256=" max_sha
+                }
+            }
+        '
+    else
+        # get specific version
+        echo "$packages_content" | awk -v ver="$desired_version" '
+            BEGIN { 
+                RS=""
+                FS="\n"
+            }
+            {
+                found_ver=0
+                filename=""
+                sha256=""
+                
+                for (i=1; i<=NF; i++) {
+                    if ($i ~ /^Version: /) {
+                        sub(/^Version: /, "", $i)
+                        if ($i == ver) found_ver=1
+                    }
+                    else if ($i ~ /^Filename: /) {
+                        sub(/^Filename: /, "", $i)
+                        filename=$i
+                    }
+                    else if ($i ~ /^SHA256: /) {
+                        sub(/^SHA256: /, "", $i)
+                        sha256=$i
+                    }
+                }
+                
+                if (found_ver) {
+                    print "FILENAME=" filename
+                    print "SHA256=" sha256
+                    exit
+                }
+            }
+        '
+    fi
+}
+
 useAR=0
 TEMPDIR="workdir-temp"
 
@@ -36,13 +147,17 @@ PACKAGES_PATH=$(echo "$RELEASES_RESP" | awk '{print $3}')
 
 UNITY_PACKAGES="$UNITY_BASE_URL/dists/stable/$PACKAGES_PATH"
 
-# again, making assumptions that will likely break
-# is latest release always the bottom and always going to be 19 lines?
-PACKAGES_RESP=$(curl -sL $UNITY_PACKAGES | tail -n 19)
-UNITY_HUB_PACKAGE_VERSION=$(echo "$PACKAGES_RESP" | grep "Version" | awk '{print $2}')
-UNITY_HUB_PACKAGE_FILENAME=$(echo "$PACKAGES_RESP" | grep "Filename" | rev | cut -d'/' -f1 | rev ) # stupid but works
-UNITY_HUB_PACKAGE_URL="$UNITY_BASE_URL/$(echo "$PACKAGES_RESP" | grep "Filename" |awk '{print $2}')"
-UNITY_HUB_PACKAGE_SHA=$(echo "$PACKAGES_RESP" | grep "SHA256" | awk '{print $2}')
+UNITY_PACKAGES_RESP="$(get_package_info "$(curl -sL $UNITY_PACKAGES)" "$VER")"
+echo "$UNITY_PACKAGES_RESP"
+
+if [[ -n "$UNITY_PACKAGES_RESP" ]]; then
+    eval "$UNITY_PACKAGES_RESP"
+    UNITY_HUB_PACKAGE_VERSION="$VER"
+    UNITY_HUB_PACKAGE_FILENAME="$(echo "$FILENAME" | rev | cut -d'/' -f1 | rev)"
+    UNITY_HUB_PACKAGE_URL="$UNITY_BASE_URL/$FILENAME"
+    UNITY_HUB_PACKAGE_SHA="$SHA256";
+    unset VERSION FILENAME SHA256
+fi
 
 # echo "$UNITY_HUB_PACKAGE_VERSION"
 # echo "$UNITY_HUB_PACKAGE_FILENAME"
