@@ -1,8 +1,164 @@
 #!/bin/bash
+set -e
+
+if [[ -t 0 ]]; then
+    UHAI_IN_TERMINAL="TRUE"
+fi
+
+if [[ ! -z "$DEBUG" ]]; then
+    env
+    set -ux
+fi
+
 SELF=$(readlink -f "$0")
-HERE=${SELF%/*}
-export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib/x86_64-linux-gnu:${HERE}/usr/lib64:${LD_LIBRARY_PATH}"
-export PATH="${HERE}/usr/bin:${PATH}"
-UNITYHUB="${HERE}/usr/bin/unityhub"
-[ ! -f "$UNITYHUB" ] && UNITYHUB="${HERE}/unityhub"
-exec "$UNITYHUB" "$@"
+APPDIR=${SELF%/*}
+
+# same exports that the official appimage did just in case
+export PATH="${APPDIR}:${APPDIR}/usr/sbin:${PATH}"
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${APPDIR}/usr/lib64:${LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="${APPDIR}/usr/share/:${XDG_DATA_DIRS}:/usr/share/gnome/:/usr/local/share/:/usr/share/"
+export GSETTINGS_SCHEMA_DIR="${APPDIR}/usr/share/glib-2.0/schemas:${GSETTINGS_SCHEMA_DIR}"
+
+CONFIG_DIR="${HOME}/.config/uhai"
+CONFIG_FILE="${HOME}/.config/uhai/config"
+
+if [[ ! -d "${CONFIG_DIR}" ]]; then
+    mkdir -p "${CONFIG_DIR}"
+    cp assets/config "${CONFIG_FILE}"
+else
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        cp assets/config "${CONFIG_FILE}"
+    fi
+fi
+
+UNITYHUB_UPDATE_DIR="${HOME}/.cache/unityhub-updater/pending"
+
+function main() {
+    if [[ "$(get_uhai_config_val "UHAI_FIRST_RUN")" != "FALSE" ]]; then
+        check_uh_autoupdates
+        update_uhai_config "UHAI_FIRST_RUN" "FALSE"
+    fi
+
+    echo "====== Running Unity Hub ======"
+
+    UNITYHUB="${APPDIR}/unityhub"
+
+    # we pass home because UH doesn't follow symlinks 
+    # and will read as 0 bytes free on immutable distros
+    exec env HOME="$(readlink -f "$HOME")" "$UNITYHUB" "$@"
+}
+
+function ask_yes_no() {
+    local prompt_message="${1}"
+    while true; do
+        read -p "${prompt_message} (y/n): " response
+        case "${response}" in
+        [Yy]*) return 0 ;; # User answered yes
+        [Nn]*) return 1 ;; # User answered no
+        *) echo "Invalid response. Please answer 'y' or 'n'." ;;
+        esac
+    done
+}
+
+function dialog_yes_no() {
+    TITLE=$1
+    TEXT=$2
+
+    if command -v zenity &> /dev/null; then
+        zenity --question --title="${TITLE}" --text="${TEXT}" 2>/dev/null
+        return $?
+    elif command -v kdialog &> /dev/null; then
+        kdialog --title "${TITLE}" --yesno "${TEXT}"
+        return $?
+    else
+        echo "Error: No way to get user input" >&2
+        return 1
+    fi
+}
+
+function update_uhai_config() {
+    if ! grep -q "^${1}=" "${CONFIG_FILE}"; then
+        echo "${1}=${2}" >>"${CONFIG_FILE}"
+    else
+        sed -i "s/^${1}=.*/${1}=${2}/" "${CONFIG_FILE}"
+    fi
+}
+
+function get_uhai_config_val() {
+    grep "^${1}=.*" ${CONFIG_FILE} | cut -d'=' -f2
+}
+
+function check_uh_autoupdates() {
+    # if we are running in a terminal
+    if [[ "${UHAI_IN_TERMINAL}" = "TRUE" ]]; then
+        # if update dir does exist
+        if [[ -d "${UNITYHUB_UPDATE_DIR}" ]]; then
+            # get perms of dir
+            UNITYHUB_UPDATE_PERMS=$(stat -c "%a" ${UNITYHUB_UPDATE_DIR})
+            # if they aren't read-only, offer to set.
+            if [[ ${UNITYHUB_UPDATE_PERMS} -ne 444 ]]; then
+                if ask_yes_no "${UHAI_TEXT_UPDATE_DIR_EXIST}"; then
+                    update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "TRUE"
+                else
+                    update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "FALSE"
+                fi
+            fi
+        # if update dir does not exist offer to create it and set perms
+        else
+            if ask_yes_no "${UHAI_TEXT_UPDATE_DIR_NOT_EXIST}"; then
+                mkdir -p "${UNITYHUB_UPDATE_DIR}"
+                UNITYHUB_UPDATE_PERMS=$(stat -c "%a" ${UNITYHUB_UPDATE_DIR})
+                update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "TRUE"
+            else
+                update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "FALSE"
+            fi
+        fi
+    # if we aren't terminal
+    else
+        # if update dir does exist
+        if [[ -d "${UNITYHUB_UPDATE_DIR}" ]]; then
+            # get perms of dir
+            UNITYHUB_UPDATE_PERMS=$(stat -c "%a" ${UNITYHUB_UPDATE_DIR})
+            # if they aren't read-only, offer to set.
+            if [[ ${UNITYHUB_UPDATE_PERMS} -ne 444 ]]; then
+                if dialog_yes_no "UHAI" "${UHAI_TEXT_UPDATE_DIR_EXIST}"; then
+                    update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "TRUE"
+                else
+                    update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "FALSE"
+                fi
+            fi
+        # if update dir does not exist offer to create it and set perms
+        else
+            if dialog_yes_no "UHAI" "${UHAI_TEXT_UPDATE_DIR_NOT_EXIST}"; then
+                mkdir -p "${UNITYHUB_UPDATE_DIR}"
+                UNITYHUB_UPDATE_PERMS=$(stat -c "%a" ${UNITYHUB_UPDATE_DIR})
+                update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "TRUE"
+            else
+                update_uhai_config "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES" "FALSE"
+            fi
+        fi
+    fi
+
+    # if config says to disable updates then we disable updates
+    if [[ "$(get_uhai_config_val "UHAI_DISABLE_UNITYHUB_BUILTIN_AUTOUPDATES")" = "TRUE" ]]; then
+        chmod 444 "${UNITYHUB_UPDATE_DIR}"
+    fi
+}
+
+# Texts
+UHAI_TEXT_UPDATE_DIR_NOT_EXIST="Unity Hub auto-update dir does not exist.
+Unity Hub will automatically create this directory during the auto-update process.
+
+Allowing Unity Hub to use its built-in auto-updater risks corrupting the appimage and preventing it from running again later.
+More details: https://github.com/ArcaneDisgea/unofficial-unityhub-appimage/issues/1
+
+Would you like to pre-emptively create the directory and disable the built-in auto-updates?"
+
+UHAI_TEXT_UPDATE_DIR_EXIST="Unity Hub built-in auto-updates not disabled.
+
+Allowing Unity Hub to use its built-in auto-updater risks corrupting the appimage and preventing it from running again later.
+More details: https://github.com/ArcaneDisgea/unofficial-unityhub-appimage/issues/1
+
+Would you like to disable the built-in auto-updates?"
+
+main $@

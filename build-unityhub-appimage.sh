@@ -85,12 +85,14 @@ get_package_info() {
             }
             {
                 found_ver=0
+                version=""
                 filename=""
                 sha256=""
                 
                 for (i=1; i<=NF; i++) {
                     if ($i ~ /^Version: /) {
                         sub(/^Version: /, "", $i)
+                        version=$i
                         if ($i == ver) found_ver=1
                     }
                     else if ($i ~ /^Filename: /) {
@@ -104,6 +106,7 @@ get_package_info() {
                 }
                 
                 if (found_ver) {
+                    print "VERSION=" version
                     print "FILENAME=" filename
                     print "SHA256=" sha256
                     exit
